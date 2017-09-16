@@ -22,10 +22,13 @@ from iarc_task_action_server import IarcTaskActionServer
 import iarc_tasks.task_states as task_states
 import iarc_tasks.task_commands as task_commands
 
+from obstacle_avoider import ObstacleAvoider
+
 class MotionPlanner:
 
-    def __init__(self, _action_server, update_rate):
+    def __init__(self, _action_server, obstacle_avoider, update_rate):
         self._action_server = _action_server
+        self._obstacle_avoider = obstacle_avoider
         self._update_rate = update_rate
         self._task = None
         self._velocity_pub = rospy.Publisher('movement_velocity_targets',
@@ -74,6 +77,10 @@ class MotionPlanner:
 
     def run(self):
         rate = rospy.Rate(self._update_rate)
+
+        if not self._obstacle_avoider.wait_until_ready():
+            rospy.logerr('Obstacle avoider wait_until_ready failed')
+            return
 
         rospy.logwarn('trying to form bond')
         if not self._safety_client.form_bond():
@@ -194,22 +201,29 @@ class MotionPlanner:
 
     def _handle_passthrough_command(self, passthrough_command):
         if self._in_passthrough:
-            msg = OrientationThrottleStamped()
-            msg.header.stamp = rospy.Time.now()
-            msg.data.pitch = passthrough_command.pitch
-            msg.data.roll = passthrough_command.roll
-            msg.data.yaw = passthrough_command.vyaw
-            msg.throttle = passthrough_command.vz
-            self._passthrough_pub.publish(msg)
+            if self._obstacle_avoider.is_safe():
+                msg = OrientationThrottleStamped()
+                msg.header.stamp = rospy.Time.now()
+                msg.data.pitch = passthrough_command.pitch
+                msg.data.roll = passthrough_command.roll
+                msg.data.yaw = passthrough_command.vyaw
+                msg.throttle = passthrough_command.vz
+                self._passthrough_pub.publish(msg)
+            else:
+                rospy.logerr('Too close to obstacle in passthrough mode')
+                self._ground_interaction_client.cancel_goal()
+                self._in_passthrough = False
         else:
             rospy.logerr('Task requested a passthrough command when not in passthrough mode')
 
     def _publish_twist(self, twist):
-
         if type(twist) is TwistStampedArray:
+            for i in range(len(twist.twists)):
+                twist.twists[i] = self._obstacle_avoider.get_safe_velocity(twist.twists[i])
             self._last_twist = twist.twists[-1]
             self._velocity_pub.publish(twist)
         elif type(twist) is TwistStamped:
+            twist = self._obstacle_avoider.get_safe_velocity(twist)
             self._last_twist = twist
             velocity_msg = TwistStampedArray()
             velocity_msg.twists = [twist]
@@ -225,6 +239,13 @@ class MotionPlanner:
         self._safety_land_complete = True
 
     def _get_task_command(self):
+        if self._in_passthrough and not self._obstacle_avoider.is_safe():
+            rospy.logerr('Unsafe location in passthrough mode, exiting passthrough')
+            self._ground_interaction_client.cancel_goal()
+            self._in_passthrough = False
+            self._action_server.set_aborted()
+            self._task = None
+
         if (self._task is None) and self._action_server.has_new_task():
             self._task = self._action_server.get_new_task()
 
@@ -304,11 +325,20 @@ class MotionPlanner:
 
 if __name__ == '__main__':
     rospy.init_node('motion_planner')
+
+    while (not rospy.is_shutdown()
+       and rospy.Time.now() == rospy.Time(0)):
+        pass
+
+    rospy.loginfo('motion planner has nonzero time')
+
     action_server = IarcTaskActionServer()
 
     update_rate = rospy.get_param('~update_rate', False)
 
-    motion_planner = MotionPlanner(action_server, update_rate)
+    obstacle_avoider = ObstacleAvoider()
+
+    motion_planner = MotionPlanner(action_server, obstacle_avoider, update_rate)
     try:
         motion_planner.run()
     except Exception, e:

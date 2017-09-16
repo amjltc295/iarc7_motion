@@ -1,0 +1,4 @@
+obst_avoidance_radius: 1.0
+obst_avoidance_time: 0.5
+startup_timeout: 10.0
+timeout: 1.0
