@@ -77,7 +77,7 @@ class TranslateStopPlanner():
                                          x, y, z,
                                          distance,
                                          integrated_speed_towards_target):
-       
+
         # Compute a dot product to find our measured speed towards target
         measured_speed_towards_target = ((self._last_actual_twist.linear.x
                                         * x
@@ -145,7 +145,7 @@ class TranslateStopPlanner():
         # Calculate the desired speed from the acceleration
         # This is a future requested velocity
         desired_speed_towards_target = (integrated_speed_towards_target
-                                       + (target_acceleration 
+                                       + (target_acceleration
                                        * self._update_period))
 
         # Calculate the target vx vector
