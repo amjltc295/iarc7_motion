@@ -21,7 +21,6 @@ from iarc_tasks.task_states import (TaskRunning,
                                     TaskAborted,
                                     TaskFailed)
 from iarc_tasks.task_commands import (VelocityCommand,
-                                      ArmCommand,
                                       NopCommand)
 
 from height_holder import HeightHolder
@@ -70,7 +69,7 @@ class GoToRoombaTask(object, AbstractTask):
         try:
             self._TRANSFORM_TIMEOUT = rospy.get_param('~transform_timeout')
             self._MAX_HORIZ_SPEED = rospy.get_param('~max_translation_speed')
-            self._MAX_START_TASK_DIST = rospy.get_param('~roomba_max_start_task_dist')
+            self._MAX_START_TASK_DIST = rospy.get_param('~roomba_max_task_dist')
             self._MAX_END_TASK_DIST = rospy.get_param('~roomba_max_end_task_dist')
             self._MAX_Z_VELOCITY = rospy.get_param('~max_z_velocity')
             self._K_X = rospy.get_param('~k_term_tracking_x')
@@ -89,6 +88,8 @@ class GoToRoombaTask(object, AbstractTask):
         self._overshoot = 0.0
 
         self._state = GoToRoombaTaskState.init
+
+        self._update_rate = rospy.get_param('~update_rate', False)
 
     def _receive_roomba_status(self, data):
         with self._lock:
@@ -160,6 +161,10 @@ class GoToRoombaTask(object, AbstractTask):
                         self._drone_odometry.pose.pose.position.y,
                         self._drone_odometry.pose.pose.position.z)
                 rospy.loginfo(stopPlanner._odometry)
+                rate = rospy.Rate(self._update_rate)
+                rate.sleep()
+                rospy.logwarn('Sleep for 2 sec before get_xyz')
+                rospy.sleep(2.)
                 velocity_response = stopPlanner.get_xyz_hold_response()
                 x_vel_target = velocity_response.twist.linear.x
                 y_vel_target = velocity_response.twist.linear.y
